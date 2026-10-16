@@ -1,0 +1,8 @@
+[
+  {
+    "title": "Catch the Stars",
+    "author": "Example",
+    "path": "examples/catch-the-stars/",
+    "description": "Move the basket to catch falling stars. Miss three and it's game over!"
+  }
+]
