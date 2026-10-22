@@ -36,9 +36,21 @@
     const SQUARE = 24;            // how big each square of the board is
     const SPEED = 150;            // how long the snake waits between steps (smaller = faster)
     const START_LENGTH = 4;       // how many squares long the snake starts
+    const LIVES = 5;              // how many times you can hit a wall
     const SNAKE_COLOR = '#3fa9ff';
     const HEAD_COLOR = '#8fd3ff';
-    const FOOD = '🍕';            // what the snake eats (try another emoji!)
+    // The foods the snake can eat. Each time, one is picked at random.
+    // Add your favorite food emoji to the list!
+    const FOODS = ['🍕', '🍔', '🌮', '🍩', '🍎', '🍓', '🧁', '🍉', '🍟', '🍪'];
+    const CHOMP_VOLUME = 0.15;    // how loud the chomp is (0 = silent, 0.5 = loud!)
+    const TONGUE_COLOR = '#ff4d6d';
+    // How far the tongue sticks out on each step (0 = hidden, 1 = all the way out).
+    // The game goes through this list over and over. Add numbers to change the flick!
+    const TONGUE_FLICK = [0, 0, 0, 0.5, 1, 0.5];
+    const BOMB = '💣';
+    const BOMB_EVERY = 10;        // a new bomb shows up every this many seconds
+    const BOMB_DANGER = 2;        // how many squares away from a bomb is "too close"
+    const BOMB_FUSE = 5;          // how many seconds until a bomb blows up
 
     const COLUMNS = canvas.width / SQUARE;
     const ROWS = canvas.height / SQUARE;
@@ -48,9 +60,16 @@
     let snake = [];
     let direction = { x: 1, y: 0 };      // which way the snake is going (right)
     let nextDirection = direction;       // which way it will turn on the next step
-    let pizza = null;                    // where the pizza is
+    let food = null;                     // where the food is, and which food it is
     let score = 0;
     let gameOver = false;
+    let lives = LIVES;
+    let pausedUntil = 0;                 // after losing a life, the game waits until this time
+    let ouchMessage = '';                // what to show when you lose a life
+    let stepCount = 0;                  // how many steps the snake has taken
+    let bombs = [];                      // a list of where all the bombs are
+    let lastBombTime = 0;                // when the last bomb showed up
+    let explodedBomb = null;             // the bomb that went BOOM (if any)
 
     // The browser can remember things even after you close the page.
     // We use that to save your best score. (It stays on this computer only.)
@@ -68,28 +87,147 @@
       } catch (e) {}
     }
 
-    // Put the pizza on a random square that the snake isn't on.
-    function placePizza() {
-      do {
-        pizza = {
-          x: Math.floor(Math.random() * COLUMNS),
-          y: Math.floor(Math.random() * ROWS),
-        };
-      } while (snake.some(part => part.x === pizza.x && part.y === pizza.y));
+    function randomSquare() {
+      return {
+        x: Math.floor(Math.random() * COLUMNS),
+        y: Math.floor(Math.random() * ROWS),
+      };
     }
 
-    // Start a fresh game.
-    function restart() {
+    function onSnake(spot) {
+      return snake.some(part => part.x === spot.x && part.y === spot.y);
+    }
+
+    // Is this spot within "distance" squares of the other spot?
+    function isNear(spot, other, distance) {
+      return Math.abs(spot.x - other.x) <= distance && Math.abs(spot.y - other.y) <= distance;
+    }
+
+    // Is this spot inside any bomb's danger zone?
+    function nearBomb(spot) {
+      return bombs.find(bomb => isNear(spot, bomb, BOMB_DANGER));
+    }
+
+    // Put the food on a random square that's not on the snake or near a bomb.
+    function placeFood() {
+      const lastEmoji = food ? food.emoji : null;
+      do {
+        food = randomSquare();
+      } while (onSnake(food) || nearBomb(food));
+
+      // Pick a random food, but not the same one as last time.
+      do {
+        food.emoji = FOODS[Math.floor(Math.random() * FOODS.length)];
+      } while (food.emoji === lastEmoji && FOODS.length > 1);
+    }
+
+    // Put a new bomb somewhere fair: not on the snake, not too close to the
+    // snake's head, and not where it would cover up the food.
+    function placeBomb() {
+      for (let tries = 0; tries < 100; tries++) {
+        const bomb = randomSquare();
+        if (onSnake(bomb)) continue;
+        if (isNear(bomb, snake[0], BOMB_DANGER + 3)) continue;
+        if (isNear(bomb, food, BOMB_DANGER)) continue;
+        bomb.placedAt = performance.now();     // start the fuse!
+        bombs.push(bomb);
+        return;
+      }
+      // No good spot found this time. We'll try again at the next bomb time.
+    }
+
+    // Put the snake back at the start, small again and heading right.
+    function resetSnake() {
       snake = [];
       for (let i = 0; i < START_LENGTH; i++) {
         snake.push({ x: 5 - i, y: 10 });
       }
       direction = { x: 1, y: 0 };
       nextDirection = direction;
+    }
+
+    // Is this spot on the board and not on the snake?
+    function isSafe(spot) {
+      const onBoard = spot.x >= 0 && spot.x < COLUMNS && spot.y >= 0 && spot.y < ROWS;
+      return onBoard && !onSnake(spot);
+    }
+
+    // Flip the snake around: the tail becomes the head, so it backs away
+    // from trouble. It stays the same size!
+    function turnSnakeAround() {
+      snake.reverse();
+      const head = snake[0];
+      const neck = snake[1] || head;
+      // Go the way the old tail was pointing...
+      const backwards = { x: head.x - neck.x, y: head.y - neck.y };
+      // ...unless that would crash right away. Then pick a safe way instead.
+      const choices = [backwards, { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+      const safe = choices.find(d => isSafe({ x: head.x + d.x, y: head.y + d.y }));
+      direction = safe || choices[1];
+      nextDirection = direction;
+    }
+
+    // Ouch! Lose a life. If there are lives left, flip the snake around.
+    function loseLife(message) {
+      ouchMessage = message;
+      lives -= 1;
+      if (lives <= 0) {
+        gameOver = true;
+        return;
+      }
+      turnSnakeAround();
+      bombs = [];                                   // clear the bombs so it's fair
+      pausedUntil = performance.now() + 1000;       // wait 1 second to get ready
+      lastBombTime = pausedUntil;
+    }
+
+    // Start a fresh game.
+    function restart() {
+      resetSnake();
       score = 0;
+      lives = LIVES;
+      pausedUntil = 0;
       gameOver = false;
       newRecord = false;
-      placePizza();
+      bombs = [];
+      explodedBomb = null;
+      lastBombTime = performance.now();
+      placeFood();
+    }
+
+    // ===== Sounds =====
+    // We make sounds with code instead of using sound files! The browser
+    // can play a "note" and slide it from high to low, like a mini synthesizer.
+    let audio = null;
+
+    // Browsers only allow sound after you press a key or tap, so we
+    // switch the sound on the first time you do one of those.
+    function startAudio() {
+      if (!audio) audio = new AudioContext();
+      if (audio.state === 'suspended') audio.resume();
+    }
+
+    // Play one note that slides from startPitch down to endPitch.
+    function playNote(startPitch, endPitch, startTime, length) {
+      const note = audio.createOscillator();
+      const volume = audio.createGain();
+      note.type = 'square';                  // a buzzy, video-game sound
+      note.frequency.setValueAtTime(startPitch, startTime);
+      note.frequency.exponentialRampToValueAtTime(endPitch, startTime + length);
+      volume.gain.setValueAtTime(CHOMP_VOLUME, startTime);
+      volume.gain.exponentialRampToValueAtTime(0.001, startTime + length);
+      note.connect(volume);
+      volume.connect(audio.destination);
+      note.start(startTime);
+      note.stop(startTime + length);
+    }
+
+    // Chomp! Two quick bites.
+    function playChomp() {
+      if (!audio) return;
+      const now = audio.currentTime;
+      playNote(500, 120, now, 0.07);
+      playNote(500, 120, now + 0.09, 0.07);
     }
 
     // ===== Controls =====
@@ -100,6 +238,7 @@
     }
 
     document.addEventListener('keydown', e => {
+      startAudio();
       if (e.key === 'ArrowUp') turn(0, -1);
       if (e.key === 'ArrowDown') turn(0, 1);
       if (e.key === 'ArrowLeft') turn(-1, 0);
@@ -111,6 +250,7 @@
     // Swipe: remember where the finger went down, then see which way it moved.
     let swipeStart = null;
     canvas.addEventListener('pointerdown', e => {
+      startAudio();
       if (gameOver) {
         restart();
         return;
@@ -130,15 +270,24 @@
     // ===== Step: move the snake one square =====
     function step() {
       if (gameOver) return;
+      if (performance.now() < pausedUntil) return;   // taking a break after a bonk
+      stepCount += 1;
+
+      // Is it time for a new bomb? performance.now() is a clock in milliseconds.
+      if (performance.now() - lastBombTime >= BOMB_EVERY * 1000) {
+        placeBomb();
+        lastBombTime = performance.now();
+      }
+
       direction = nextDirection;
       const head = snake[0];
       const newHead = { x: head.x + direction.x, y: head.y + direction.y };
 
-      // Go off one side, come back on the other side.
-      if (newHead.x < 0) newHead.x = COLUMNS - 1;
-      if (newHead.x >= COLUMNS) newHead.x = 0;
-      if (newHead.y < 0) newHead.y = ROWS - 1;
-      if (newHead.y >= ROWS) newHead.y = 0;
+      // Did the snake hit a wall?
+      if (newHead.x < 0 || newHead.x >= COLUMNS || newHead.y < 0 || newHead.y >= ROWS) {
+        loseLife('Bonk! 💔');
+        return;
+      }
 
       // Ouch! Did the snake bite its own body?
       if (snake.some(part => part.x === newHead.x && part.y === newHead.y)) {
@@ -148,18 +297,41 @@
 
       snake.unshift(newHead);   // add a new head at the front...
 
-      if (newHead.x === pizza.x && newHead.y === pizza.y) {
+      if (newHead.x === food.x && newHead.y === food.y) {
         // Yum! Keep the tail this time, so the snake gets one square longer.
         score += 1;
+        playChomp();
         if (score > bestScore) {
           bestScore = score;     // a new record!
           newRecord = true;
           saveBestScore();
         }
-        placePizza();
+        placeFood();
       } else {
         snake.pop();            // ...and take one square off the tail
       }
+
+      updateBombs();
+    }
+
+    // Check each bomb's fuse. When it runs out: BOOM!
+    function updateBombs() {
+      const now = performance.now();
+      for (const bomb of bombs) {
+        if (bomb.explodedAt) continue;                       // already went off
+        if (now - bomb.placedAt < BOMB_FUSE * 1000) continue; // still ticking
+
+        bomb.explodedAt = now;
+        // Is any part of the snake inside the blast?
+        if (snake.some(part => isNear(part, bomb, BOMB_DANGER))) {
+          loseLife('Boom! 💔');
+          if (gameOver) explodedBomb = bomb;   // that was the last life
+          else bombs = [bomb];                 // keep just this 💥 on screen for a moment
+          break;                               // only lose one life per step
+        }
+      }
+      // Clear away explosions after half a second (500 milliseconds).
+      bombs = bombs.filter(bomb => !bomb.explodedAt || now - bomb.explodedAt < 500 || bomb === explodedBomb);
     }
 
     // ===== Draw: paint the picture for this moment =====
@@ -189,19 +361,77 @@
       }
     }
 
+    // A forked tongue that flicks in and out of the front of the head.
+    function drawTongue() {
+      const out = TONGUE_FLICK[stepCount % TONGUE_FLICK.length];
+      if (out === 0) return;     // tongue is tucked in right now
+
+      const head = snake[0];
+      // Start at the middle of the front edge of the head.
+      const startX = head.x * SQUARE + SQUARE / 2 + direction.x * SQUARE / 2;
+      const startY = head.y * SQUARE + SQUARE / 2 + direction.y * SQUARE / 2;
+      const length = SQUARE * 0.5 * out;
+      const tipX = startX + direction.x * length;
+      const tipY = startY + direction.y * length;
+      const fork = SQUARE * 0.15 * out;      // how wide the two tips spread
+
+      ctx.strokeStyle = TONGUE_COLOR;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);            // the straight part
+      ctx.lineTo(tipX, tipY);
+      for (const side of [-1, 1]) {          // the two tips of the fork
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(tipX + direction.x * fork - direction.y * fork * side,
+                   tipY + direction.y * fork + direction.x * fork * side);
+      }
+      ctx.stroke();
+    }
+
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       ctx.font = SQUARE + 'px system-ui';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(FOOD, pizza.x * SQUARE + SQUARE / 2, pizza.y * SQUARE + SQUARE / 2);
+      ctx.fillText(food.emoji, food.x * SQUARE + SQUARE / 2, food.y * SQUARE + SQUARE / 2);
+
+      for (const bomb of bombs) {
+        const centerX = bomb.x * SQUARE + SQUARE / 2;
+        const centerY = bomb.y * SQUARE + SQUARE / 2;
+
+        if (bomb.explodedAt) {
+          ctx.font = ((BOMB_DANGER * 2 + 1) * SQUARE) + 'px system-ui';   // as big as the danger zone!
+          ctx.fillText('💥', centerX, centerY);
+          continue;
+        }
+
+        // How many seconds are left on the fuse? (Math.ceil rounds up: 4.2 → 5)
+        const secondsLeft = Math.ceil(BOMB_FUSE - (performance.now() - bomb.placedAt) / 1000);
+
+        // The danger zone: a see-through red square around the bomb.
+        // In the last second it blinks brighter as a warning.
+        const blinking = secondsLeft <= 1 && stepCount % 2 === 0;
+        ctx.fillStyle = blinking ? 'rgba(255, 60, 60, 0.45)' : 'rgba(255, 60, 60, 0.18)';
+        ctx.fillRect((bomb.x - BOMB_DANGER) * SQUARE, (bomb.y - BOMB_DANGER) * SQUARE,
+                     (BOMB_DANGER * 2 + 1) * SQUARE, (BOMB_DANGER * 2 + 1) * SQUARE);
+
+        ctx.font = SQUARE + 'px system-ui';
+        ctx.fillText(BOMB, centerX, centerY);
+
+        // The countdown number, just above the bomb.
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold ' + (SQUARE * 0.6) + 'px system-ui';
+        ctx.fillText(secondsLeft, centerX, centerY - SQUARE * 0.8);
+      }
 
       for (let i = 0; i < snake.length; i++) {
         ctx.fillStyle = i === 0 ? HEAD_COLOR : SNAKE_COLOR;
         ctx.fillRect(snake[i].x * SQUARE + 1, snake[i].y * SQUARE + 1, SQUARE - 2, SQUARE - 2);
       }
       drawEyes();
+      drawTongue();
 
       ctx.fillStyle = 'white';
       ctx.font = 'bold 22px system-ui';
@@ -210,6 +440,15 @@
       ctx.fillText('Score: ' + score, 12, 10);
       ctx.textAlign = 'right';
       ctx.fillText('🏆 Best: ' + bestScore, canvas.width - 12, 10);
+      ctx.textAlign = 'center';
+      ctx.font = '18px system-ui';
+      ctx.fillText('❤️'.repeat(lives) + '🖤'.repeat(LIVES - lives), canvas.width / 2, 12);
+
+      if (performance.now() < pausedUntil) {
+        ctx.font = 'bold 40px system-ui';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ouchMessage, canvas.width / 2, canvas.height / 2);
+      }
 
       if (gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';     // darken the board a bit
@@ -218,7 +457,7 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = 'bold 48px system-ui';
-        ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 2);
+        ctx.fillText(explodedBomb ? 'BOOM!' : 'Game Over!', canvas.width / 2, canvas.height / 2);
         ctx.font = '22px system-ui';
         ctx.fillText('Press Space or tap to play again', canvas.width / 2, canvas.height / 2 + 44);
         if (newRecord) {
