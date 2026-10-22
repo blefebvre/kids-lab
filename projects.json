@@ -4,5 +4,11 @@
     "author": "Example",
     "path": "examples/catch-the-stars/",
     "description": "Move the basket to catch falling stars. Miss three and it's game over!"
+  },
+  {
+    "title": "Snake",
+    "author": "The Dude",
+    "path": "the-dude/snake/",
+    "description": "Steer the snake to gobble up pizza. Every slice makes it longer!"
   }
 ]

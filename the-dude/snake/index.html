@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snake</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0a1430;
+      color: white;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+    canvas {
+      background: #14285c;
+      border-radius: 12px;
+      max-width: 100%;
+      touch-action: none;
+    }
+    a { color: #6cc4ff; }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="480" height="480"></canvas>
+  <p>Steer with the arrow keys, or swipe with your finger. <a href="../../">Back to the lab</a></p>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // ===== Things you can change! Try different numbers. =====
+    const SQUARE = 24;            // how big each square of the board is
+    const SPEED = 150;            // how long the snake waits between steps (smaller = faster)
+    const START_LENGTH = 4;       // how many squares long the snake starts
+    const SNAKE_COLOR = '#3fa9ff';
+    const HEAD_COLOR = '#8fd3ff';
+    const FOOD = '🍕';            // what the snake eats (try another emoji!)
+
+    const COLUMNS = canvas.width / SQUARE;
+    const ROWS = canvas.height / SQUARE;
+
+    // ===== The game's memory (its "state") =====
+    // The snake is a list of squares. The first one is the head.
+    let snake = [];
+    let direction = { x: 1, y: 0 };      // which way the snake is going (right)
+    let nextDirection = direction;       // which way it will turn on the next step
+    let pizza = null;                    // where the pizza is
+    let score = 0;
+    let gameOver = false;
+
+    // The browser can remember things even after you close the page.
+    // We use that to save your best score. (It stays on this computer only.)
+    let bestScore = 0;
+    let newRecord = false;     // did you beat your best score this game?
+    try {
+      bestScore = Number(localStorage.getItem('snake-best-score')) || 0;
+    } catch (e) {
+      // Some browsers don't let pages remember things. That's OK.
+    }
+
+    function saveBestScore() {
+      try {
+        localStorage.setItem('snake-best-score', bestScore);
+      } catch (e) {}
+    }
+
+    // Put the pizza on a random square that the snake isn't on.
+    function placePizza() {
+      do {
+        pizza = {
+          x: Math.floor(Math.random() * COLUMNS),
+          y: Math.floor(Math.random() * ROWS),
+        };
+      } while (snake.some(part => part.x === pizza.x && part.y === pizza.y));
+    }
+
+    // Start a fresh game.
+    function restart() {
+      snake = [];
+      for (let i = 0; i < START_LENGTH; i++) {
+        snake.push({ x: 5 - i, y: 10 });
+      }
+      direction = { x: 1, y: 0 };
+      nextDirection = direction;
+      score = 0;
+      gameOver = false;
+      newRecord = false;
+      placePizza();
+    }
+
+    // ===== Controls =====
+    function turn(x, y) {
+      // Don't let the snake turn straight back into itself.
+      if (x === -direction.x && y === -direction.y) return;
+      nextDirection = { x: x, y: y };
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowUp') turn(0, -1);
+      if (e.key === 'ArrowDown') turn(0, 1);
+      if (e.key === 'ArrowLeft') turn(-1, 0);
+      if (e.key === 'ArrowRight') turn(1, 0);
+      if (e.key.startsWith('Arrow')) e.preventDefault();   // stop the page from scrolling
+      if (gameOver && (e.key === ' ' || e.key === 'Enter')) restart();
+    });
+
+    // Swipe: remember where the finger went down, then see which way it moved.
+    let swipeStart = null;
+    canvas.addEventListener('pointerdown', e => {
+      if (gameOver) {
+        restart();
+        return;
+      }
+      swipeStart = { x: e.clientX, y: e.clientY };
+    });
+    canvas.addEventListener('pointerup', e => {
+      if (!swipeStart) return;
+      const dx = e.clientX - swipeStart.x;
+      const dy = e.clientY - swipeStart.y;
+      swipeStart = null;
+      if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;   // too small to count
+      if (Math.abs(dx) > Math.abs(dy)) turn(Math.sign(dx), 0);
+      else turn(0, Math.sign(dy));
+    });
+
+    // ===== Step: move the snake one square =====
+    function step() {
+      if (gameOver) return;
+      direction = nextDirection;
+      const head = snake[0];
+      const newHead = { x: head.x + direction.x, y: head.y + direction.y };
+
+      // Go off one side, come back on the other side.
+      if (newHead.x < 0) newHead.x = COLUMNS - 1;
+      if (newHead.x >= COLUMNS) newHead.x = 0;
+      if (newHead.y < 0) newHead.y = ROWS - 1;
+      if (newHead.y >= ROWS) newHead.y = 0;
+
+      // Ouch! Did the snake bite its own body?
+      if (snake.some(part => part.x === newHead.x && part.y === newHead.y)) {
+        gameOver = true;
+        return;
+      }
+
+      snake.unshift(newHead);   // add a new head at the front...
+
+      if (newHead.x === pizza.x && newHead.y === pizza.y) {
+        // Yum! Keep the tail this time, so the snake gets one square longer.
+        score += 1;
+        if (score > bestScore) {
+          bestScore = score;     // a new record!
+          newRecord = true;
+          saveBestScore();
+        }
+        placePizza();
+      } else {
+        snake.pop();            // ...and take one square off the tail
+      }
+    }
+
+    // ===== Draw: paint the picture for this moment =====
+    function drawCircle(x, y, radius, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    // Two eyes on the head, looking the way the snake is going.
+    function drawEyes() {
+      const head = snake[0];
+      const centerX = head.x * SQUARE + SQUARE / 2;
+      const centerY = head.y * SQUARE + SQUARE / 2;
+      const forward = SQUARE * 0.15;     // how far toward the front the eyes sit
+      const apart = SQUARE * 0.22;       // how far apart the eyes are
+      const EYE_SIZE = SQUARE * 0.18;
+      const PUPIL_SIZE = SQUARE * 0.09;
+
+      for (const side of [-1, 1]) {      // -1 = left eye, 1 = right eye
+        const eyeX = centerX + direction.x * forward - direction.y * apart * side;
+        const eyeY = centerY + direction.y * forward + direction.x * apart * side;
+        drawCircle(eyeX, eyeY, EYE_SIZE, 'white');
+        // The pupil sits a little forward, so the snake looks where it's going.
+        drawCircle(eyeX + direction.x * 2, eyeY + direction.y * 2, PUPIL_SIZE, 'black');
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.font = SQUARE + 'px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(FOOD, pizza.x * SQUARE + SQUARE / 2, pizza.y * SQUARE + SQUARE / 2);
+
+      for (let i = 0; i < snake.length; i++) {
+        ctx.fillStyle = i === 0 ? HEAD_COLOR : SNAKE_COLOR;
+        ctx.fillRect(snake[i].x * SQUARE + 1, snake[i].y * SQUARE + 1, SQUARE - 2, SQUARE - 2);
+      }
+      drawEyes();
+
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 22px system-ui';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Score: ' + score, 12, 10);
+      ctx.textAlign = 'right';
+      ctx.fillText('🏆 Best: ' + bestScore, canvas.width - 12, 10);
+
+      if (gameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';     // darken the board a bit
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 48px system-ui';
+        ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 2);
+        ctx.font = '22px system-ui';
+        ctx.fillText('Press Space or tap to play again', canvas.width / 2, canvas.height / 2 + 44);
+        if (newRecord) {
+          ctx.fillStyle = '#ffd84a';
+          ctx.fillText('🎉 New high score! 🎉', canvas.width / 2, canvas.height / 2 - 56);
+        }
+      }
+    }
+
+    // ===== The game loop: step, draw, wait, repeat =====
+    setInterval(() => {
+      step();
+      draw();
+    }, SPEED);
+    restart();
+    draw();
+  </script>
+</body>
+</html>
