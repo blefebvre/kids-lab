@@ -15,7 +15,7 @@ Then say what you want to make, like *"make a game where a cat catches falling f
 ## See it in your browser
 
 ```bash
-python -m http.server 8000
+python serve.py
 ```
 
 Open http://localhost:8000.

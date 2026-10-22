@@ -45,7 +45,7 @@ typing for themselves or with a parent nearby.
 
 ## Previewing and publishing
 
-- Preview locally: run `python -m http.server 8000` in this folder and open
+- Preview locally: run `python serve.py` in this folder and open
   http://localhost:8000.
 - Publishing: commit and push to `main`. The site updates within a minute or
   two. Always ask before committing or pushing, and write commit messages a
