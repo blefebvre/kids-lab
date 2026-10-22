@@ -48,5 +48,12 @@ typing for themselves or with a parent nearby.
 - Preview locally: run `python serve.py` in this folder and open
   http://localhost:8000.
 - Publishing: commit and push to `main`. The site updates within a minute or
-  two. Always ask before committing or pushing, and write commit messages a
-  kid can understand ("Add jumping to the cat game").
+  two. Write commit messages a kid can understand ("Add jumping to the cat
+  game").
+- When asked to "deploy" a game (or the site), that is permission to commit
+  the changes and push to `origin` right away, without asking first. Commit
+  only that game's files and any files it needs (like `projects.json`). If
+  other changes are lying around, ask before including them. Otherwise, always
+  ask before committing or pushing.
+- If `git push` can't find a GitHub login, push using the GitHub CLI's login:
+  `git -c credential.helper= -c credential.helper='!gh auth git-credential' push origin main`
