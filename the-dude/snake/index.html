@@ -64,7 +64,7 @@
     let score = 0;
     let gameOver = false;
     let lives = LIVES;
-    let pausedUntil = 0;                 // after losing a life, the game waits until this time
+    let waitingForKey = false;           // after losing a life, wait until you're ready
     let ouchMessage = '';                // what to show when you lose a life
     let stepCount = 0;                  // how many steps the snake has taken
     let bombs = [];                      // a list of where all the bombs are
@@ -177,8 +177,7 @@
       }
       turnSnakeAround();
       bombs = [];                                   // clear the bombs so it's fair
-      pausedUntil = performance.now() + 1000;       // wait 1 second to get ready
-      lastBombTime = pausedUntil;
+      waitingForKey = true;                         // wait until you press a key
     }
 
     // Start a fresh game.
@@ -186,7 +185,7 @@
       resetSnake();
       score = 0;
       lives = LIVES;
-      pausedUntil = 0;
+      waitingForKey = false;
       gameOver = false;
       newRecord = false;
       bombs = [];
@@ -237,14 +236,21 @@
       nextDirection = { x: x, y: y };
     }
 
+    // After losing a life, get the snake going again.
+    function keepGoing() {
+      waitingForKey = false;
+      lastBombTime = performance.now();    // start the bomb timer fresh
+    }
+
     document.addEventListener('keydown', e => {
       startAudio();
       if (e.key === 'ArrowUp') turn(0, -1);
       if (e.key === 'ArrowDown') turn(0, 1);
       if (e.key === 'ArrowLeft') turn(-1, 0);
       if (e.key === 'ArrowRight') turn(1, 0);
-      if (e.key.startsWith('Arrow')) e.preventDefault();   // stop the page from scrolling
+      if (e.key.startsWith('Arrow') || e.key === ' ') e.preventDefault();   // stop the page from scrolling
       if (gameOver && (e.key === ' ' || e.key === 'Enter')) restart();
+      else if (waitingForKey) keepGoing();   // any key gets you going again
     });
 
     // Swipe: remember where the finger went down, then see which way it moved.
@@ -262,15 +268,18 @@
       const dx = e.clientX - swipeStart.x;
       const dy = e.clientY - swipeStart.y;
       swipeStart = null;
-      if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;   // too small to count
-      if (Math.abs(dx) > Math.abs(dy)) turn(Math.sign(dx), 0);
-      else turn(0, Math.sign(dy));
+      const bigEnough = Math.abs(dx) >= 20 || Math.abs(dy) >= 20;   // a tiny wiggle doesn't count
+      if (bigEnough) {
+        if (Math.abs(dx) > Math.abs(dy)) turn(Math.sign(dx), 0);
+        else turn(0, Math.sign(dy));
+      }
+      if (waitingForKey) keepGoing();        // a tap or swipe gets you going again
     });
 
     // ===== Step: move the snake one square =====
     function step() {
       if (gameOver) return;
-      if (performance.now() < pausedUntil) return;   // taking a break after a bonk
+      if (waitingForKey) return;                     // waiting for you to be ready
       stepCount += 1;
 
       // Is it time for a new bomb? performance.now() is a clock in milliseconds.
@@ -291,7 +300,7 @@
 
       // Ouch! Did the snake bite its own body?
       if (snake.some(part => part.x === newHead.x && part.y === newHead.y)) {
-        gameOver = true;
+        loseLife('Ouch! 💔');
         return;
       }
 
@@ -444,10 +453,12 @@
       ctx.font = '18px system-ui';
       ctx.fillText('❤️'.repeat(lives) + '🖤'.repeat(LIVES - lives), canvas.width / 2, 12);
 
-      if (performance.now() < pausedUntil) {
+      if (waitingForKey) {
         ctx.font = 'bold 40px system-ui';
         ctx.textBaseline = 'middle';
         ctx.fillText(ouchMessage, canvas.width / 2, canvas.height / 2);
+        ctx.font = '20px system-ui';
+        ctx.fillText('Press a key or tap to keep going', canvas.width / 2, canvas.height / 2 + 40);
       }
 
       if (gameOver) {
